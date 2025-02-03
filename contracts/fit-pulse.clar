@@ -5,6 +5,7 @@
 (define-constant err-unauthorized (err u100))
 (define-constant err-invalid-input (err u101))
 (define-constant err-challenge-ended (err u102))
+(define-constant err-insufficient-balance (err u103))
 
 ;; Define token
 (define-fungible-token fit-token)
@@ -27,7 +28,8 @@
     workout-type: (string-ascii 64),
     duration: uint,
     intensity: uint,
-    timestamp: uint
+    timestamp: uint,
+    tokens-rewarded: uint
   }
 )
 
@@ -46,6 +48,7 @@
 ;; Variables
 (define-data-var workout-counter uint u0)
 (define-data-var challenge-counter uint u0)
+(define-data-var tokens-per-minute uint u10)
 
 ;; Public functions
 (define-public (record-workout (workout-type (string-ascii 64)) (duration uint) (intensity uint))
@@ -53,6 +56,7 @@
     (
       (workout-id (+ (var-get workout-counter) u1))
       (current-time (get-block-info? time (- block-height u1)))
+      (token-reward (calculate-token-reward duration intensity))
     )
     (map-set workouts workout-id
       {
@@ -60,11 +64,13 @@
         workout-type: workout-type,
         duration: duration,
         intensity: intensity,
-        timestamp: (default-to u0 current-time)
+        timestamp: (default-to u0 current-time),
+        tokens-rewarded: token-reward
       }
     )
     (var-set workout-counter workout-id)
     (calculate-and-award-xp tx-sender duration intensity)
+    (mint-workout-tokens tx-sender token-reward)
     (ok workout-id)
   )
 )
@@ -103,11 +109,23 @@
         level: (calculate-level (+ (get xp current-profile) xp-earned)),
         total-workouts: (+ (get total-workouts current-profile) u1),
         xp: (+ (get xp current-profile) xp-earned),
-        tokens-earned: (get tokens-earned current-profile)
+        tokens-earned: (+ (get tokens-earned current-profile) (calculate-token-reward duration intensity))
       }
     )
     (ok true)
   )
+)
+
+(define-private (calculate-token-reward (duration uint) (intensity uint))
+  (* (* duration (var-get tokens-per-minute)) intensity)
+)
+
+(define-private (mint-workout-tokens (user principal) (amount uint))
+  (ft-mint? fit-token amount user)
+)
+
+(define-private (calculate-level (xp uint))
+  (+ u1 (/ xp u1000))
 )
 
 ;; Read only functions
@@ -121,4 +139,8 @@
 
 (define-read-only (get-challenge (challenge-id uint))
   (ok (map-get? challenges challenge-id))
+)
+
+(define-read-only (get-token-rate)
+  (ok (var-get tokens-per-minute))
 )
